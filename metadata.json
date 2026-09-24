@@ -1,0 +1,8 @@
+{
+  "name": "Laporan Stock & Kavling Gudang Japfa",
+  "description": "Sistem Informasi Manajemen Stock Bahan Pembantu, Mutasi Karung Pakan, dan Stock Label Gudang PT. Japfa Comfeed Indonesia.Tbk",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

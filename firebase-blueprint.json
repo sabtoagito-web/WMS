@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "reports": {
+      "title": "Daily Reports",
+      "description": "Daily stock & kavling reports indexed by date",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "gudangSLoct": { "type": "string" },
+        "docCode": { "type": "string" },
+        "companyName": { "type": "string" },
+        "items": { "type": "array" },
+        "dibuatOlehName": { "type": "string" },
+        "dibuatOlehRole": { "type": "string" },
+        "dibuatOlehSignature": { "type": "string" },
+        "mengetahuiName": { "type": "string" },
+        "mengetahuiRole": { "type": "string" },
+        "mengetahuiSignature": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["date"]
+    },
+    "karung_reports": {
+      "title": "Daily Stock Karung Reports",
+      "description": "Daily stock of bags, sacks, and packaging sacks indexed by date",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "gudangSLoct": { "type": "string" },
+        "docCode": { "type": "string" },
+        "companyName": { "type": "string" },
+        "items": { "type": "array" },
+        "dibuatOlehName": { "type": "string" },
+        "dibuatOlehRole": { "type": "string" },
+        "dibuatOlehSignature": { "type": "string" },
+        "mengetahuiName": { "type": "string" },
+        "mengetahuiRole": { "type": "string" },
+        "mengetahuiSignature": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["date"]
+    },
+    "label_reports": {
+      "title": "Daily Stock Label Reports",
+      "description": "Daily stock of product labels, packaging tags, and barcode tags indexed by date",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "gudangSLoct": { "type": "string" },
+        "docCode": { "type": "string" },
+        "companyName": { "type": "string" },
+        "items": { "type": "array" },
+        "dibuatOlehName": { "type": "string" },
+        "dibuatOlehRole": { "type": "string" },
+        "dibuatOlehSignature": { "type": "string" },
+        "mengetahuiName": { "type": "string" },
+        "mengetahuiRole": { "type": "string" },
+        "mengetahuiSignature": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["date"]
+    },
+    "catalog": {
+      "title": "Master Material Catalog",
+      "description": "Master material catalog list",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["items"]
+    }
+  }
+}
