@@ -47,6 +47,8 @@ interface StockKarungViewProps {
   onSyncFromPreviousDay?: () => void;
   previousReportDate?: string | null;
   onSaveStock?: () => void;
+  canEditReport?: boolean;
+  isGuest?: boolean;
 }
 
 export function StockKarungView({
@@ -57,7 +59,9 @@ export function StockKarungView({
   onDateChange,
   onSyncFromPreviousDay,
   previousReportDate,
-  onSaveStock
+  onSaveStock,
+  canEditReport,
+  isGuest
 }: StockKarungViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<"table" | "inbound" | "outbound" | "print">("table");
   const [inboundViewMode, setInboundViewMode] = useState<"log" | "stock">("log");
@@ -244,6 +248,14 @@ export function StockKarungView({
   };
 
   const handleDeleteItem = (id: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (canEditReport !== undefined && !canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const item = items.find((it) => it.id === id);
     if (item) {
       setItemToDelete(item);
@@ -253,6 +265,14 @@ export function StockKarungView({
   };
 
   const handleAddNewItem = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (canEditReport !== undefined && !canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     if (!newItem.kode || !newItem.namaKarung) {
       showNotification("Kode dan Nama Karung wajib diisi!", "error");
       return;
@@ -1429,6 +1449,10 @@ export function StockKarungView({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
+                if (isGuest) {
+                  showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyimpan data!", "error");
+                  return;
+                }
                 if (onSaveStock) {
                   onSaveStock();
                 } else {
@@ -1442,8 +1466,24 @@ export function StockKarungView({
               <Save className="w-4 h-4 text-amber-100" /> Simpan Stock Karung
             </button>
             <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              onClick={() => {
+                if (isGuest) {
+                  showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+                  return;
+                }
+                if (canEditReport !== undefined && !canEditReport) {
+                  showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                  return;
+                }
+                setIsAddModalOpen(true);
+              }}
+              disabled={canEditReport === false || isGuest}
+              className={`px-3.5 py-2 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors shadow-xs ${
+                canEditReport === false || isGuest 
+                  ? "bg-neutral-400 opacity-60 cursor-not-allowed" 
+                  : "bg-emerald-700 hover:bg-emerald-800 cursor-pointer"
+              }`}
+              title={canEditReport === false || isGuest ? "Hanya akun atas nama Sabto dan Antonius yang dapat menambah karung" : "Tambah karung baru"}
             >
               <Plus className="w-4 h-4" /> Tambah Karung Baru
             </button>
@@ -1732,18 +1772,36 @@ export function StockKarungView({
                           <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => {
+                                if (isGuest) {
+                                  showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengedit data!", "error");
+                                  return;
+                                }
+                                if (canEditReport !== undefined && !canEditReport) {
+                                  showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                  return;
+                                }
                                 setEditingItem(item);
                                 setIsEditModalOpen(true);
                               }}
-                              className="p-1 text-neutral-500 hover:text-black hover:bg-neutral-100 rounded transition-colors cursor-pointer"
-                              title="Edit item karung"
+                              disabled={canEditReport === false || isGuest}
+                              className={`p-1 rounded transition-colors ${
+                                canEditReport === false || isGuest 
+                                  ? "opacity-30 cursor-not-allowed text-neutral-300" 
+                                  : "text-neutral-500 hover:text-black hover:bg-neutral-100 cursor-pointer"
+                              }`}
+                              title={canEditReport === false || isGuest ? "Hanya akun atas nama Sabto dan Antonius yang dapat mengedit" : "Edit item karung"}
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => handleDeleteItem(item.id)}
-                              className="p-1 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
-                              title="Hapus karung"
+                              disabled={canEditReport === false || isGuest}
+                              className={`p-1 rounded transition-colors ${
+                                canEditReport === false || isGuest 
+                                  ? "opacity-30 cursor-not-allowed text-neutral-300" 
+                                  : "text-neutral-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                              }`}
+                              title={canEditReport === false || isGuest ? "Hanya akun atas nama Sabto dan Antonius yang dapat menghapus" : "Hapus karung"}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

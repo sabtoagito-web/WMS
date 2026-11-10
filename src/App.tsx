@@ -32,18 +32,25 @@ import {
   Tag,
   CheckCircle2,
   Cloud,
-  Upload
+  Upload,
+  LogOut,
+  User,
+  Shield
 } from "lucide-react";
 
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
-import { db } from "./lib/firebase";
+import { db, auth, firebaseSignOut, onAuthStateChanged } from "./lib/firebase";
 import { collection, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { StockKarungView } from "./components/StockKarungView";
 import { StockLabelView } from "./components/StockLabelView";
 import { OfficialLaporanPembungkusView } from "./components/OfficialLaporanPembungkusView";
 import { WarehouseVisualizations } from "./components/WarehouseVisualizations";
 import { SignatureModal } from "./components/SignatureModal";
+import { LoginPage } from "./components/LoginPage";
+import { LoginSystemSettingsModal } from "./components/LoginSystemSettingsModal";
+import { UserProfile, isGuestUser, canEditReportData, canSaveData, canDeleteData } from "./types/auth";
+import { JapfaLogo } from "./components/JapfaLogo";
 import { KarungReport, KarungItem, DEFAULT_KARUNG_SEED, DEFAULT_INBOUND_LOGS_SEED, DEFAULT_OUTBOUND_LOGS_SEED } from "./types/karung";
 import { LabelReport, LabelItem, DEFAULT_LABEL_SEED, DEFAULT_LABEL_INBOUND_SEED, DEFAULT_LABEL_OUTBOUND_SEED, getLabelNoRange } from "./types/label";
 
@@ -876,6 +883,38 @@ function EditLotModal({ item, onClose, onSave }: EditLotModalProps) {
 // ==========================================
 
 export default function App() {
+  // User Authentication & Session State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem("japfa_warehouse_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState<boolean>(false);
+  const [isLoginSettingsModalOpen, setIsLoginSettingsModalOpen] = useState<boolean>(false);
+
+  // User Permission Flags based on user identity
+  // 1. Akun atas nama tamu hanya bisa melihat, tidak bisa mengedit, hapus, dan simpan semua data
+  // 2. Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan
+  const isGuest = isGuestUser(currentUser);
+  const canEditReport = canEditReportData(currentUser);
+  const canSave = canSaveData(currentUser);
+  const canDelete = canDeleteData(currentUser);
+
+  const handleOpenLoginSettings = () => {
+    if (isGuest) {
+      setToast({
+        message: "Akses Ditolak: Akun Tamu tidak memiliki izin administrator.",
+        type: "error"
+      });
+      return;
+    }
+    setIsLoginSettingsModalOpen(true);
+  };
+
   const [selectedDate, setSelectedDate] = useState<string>(SEED_DATE);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"dashboard" | "stock" | "stock-karung" | "stock-label" | "laporan-resmi" | "masuk" | "keluar" | "kavling">("dashboard");
@@ -1208,6 +1247,10 @@ export default function App() {
   }, [toast]);
 
   const saveCatalogToFirestore = async (updatedCatalog: MasterMaterial[]) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyimpan data!", "error");
+      return;
+    }
     setMasterMaterials(updatedCatalog);
     try {
       await setDoc(doc(db, "settings", "catalog"), { items: updatedCatalog });
@@ -1218,6 +1261,10 @@ export default function App() {
 
   // Comprehensive Save Feature for All Stock & Reports
   const handleSaveAllStock = async () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyimpan data!", "error");
+      return;
+    }
     setIsSaving(true);
     try {
       // 1. Simpan laporan aktif Bahan Pembantu
@@ -1423,6 +1470,82 @@ export default function App() {
     };
   }, []);
 
+  // Sync auth state with Firebase Auth
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      if (fbUser) {
+        setCurrentUser((prev) => {
+          if (prev && prev.loginMethod !== "google") {
+            return prev;
+          }
+          let role: UserProfile["role"] = "Admin Gudang";
+          if (fbUser.email?.toLowerCase().includes("sabtoagito") || fbUser.email?.toLowerCase().includes("supervisor")) {
+            role = "Supervisor Gudang";
+          } else if (fbUser.email?.toLowerCase().includes("kepala") || fbUser.email?.toLowerCase().includes("manager")) {
+            role = "Kepala Bagian Gudang";
+          }
+          const userProfile: UserProfile = {
+            uid: fbUser.uid,
+            name: fbUser.displayName || fbUser.email?.split("@")[0] || "Petugas Japfa",
+            email: fbUser.email || "user@japfa.com",
+            role,
+            nik: "JPF-SSO-" + fbUser.uid.substring(0, 5).toUpperCase(),
+            photoURL: fbUser.photoURL || undefined,
+            loginMethod: "google",
+            lastLoginAt: new Date().toISOString()
+          };
+          try {
+            localStorage.setItem("japfa_warehouse_user", JSON.stringify(userProfile));
+          } catch (e) {
+            console.error("Storage error:", e);
+          }
+          return userProfile;
+        });
+      }
+      setIsAuthChecking(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLoginSuccess = (user: UserProfile) => {
+    setCurrentUser(user);
+    // Optionally auto-populate author name & role in current report if default
+    setReports((prev) => {
+      const currentReport = prev[selectedDate];
+      if (currentReport) {
+        return {
+          ...prev,
+          [selectedDate]: {
+            ...currentReport,
+            dibuatOlehName: user.name,
+            dibuatOlehRole: user.role
+          }
+        };
+      }
+      return prev;
+    });
+    setToast({
+      message: `Selamat bertugas, ${user.name}! (${user.role})`,
+      type: "success"
+    });
+  };
+
+  const handleLogout = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
+    localStorage.removeItem("japfa_warehouse_user");
+    setCurrentUser(null);
+    setIsLogoutModalOpen(false);
+    setToast({
+      message: "Sesi telah berakhir. Anda telah keluar dari sistem.",
+      type: "info"
+    });
+  };
+
   // Helpers for Stock Karung & Stock Label
   const getPreviousKarungReportDate = (currentDate: string): string | null => {
     const dates = Object.keys(karungReports).filter((d) => d < currentDate).sort();
@@ -1547,6 +1670,14 @@ export default function App() {
   };
 
   const handleUpdateKarungReport = async (updated: KarungReport) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const newMap = { ...karungReports, [selectedDate]: updated };
     setKarungReports(newMap);
     try {
@@ -1649,6 +1780,14 @@ export default function App() {
   };
 
   const handleSyncLabelFromPreviousDay = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const prevDate = getPreviousLabelReportDate(selectedDate);
     if (!prevDate || !labelReports[prevDate]) {
       showNotification(`Tidak ditemukan data laporan label sebelum tanggal ${selectedDate}`, "error");
@@ -1677,6 +1816,14 @@ export default function App() {
   };
 
   const handleUpdateLabelReport = async (updated: LabelReport) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const newMap = { ...labelReports, [selectedDate]: updated };
     setLabelReports(newMap);
     try {
@@ -1688,6 +1835,12 @@ export default function App() {
 
   // Sync to Firestore and record history stack
   const saveReportsToStorage = async (updatedReports: Record<string, DailyReport>, recordHistory = true) => {
+    if (isGuest) {
+      return;
+    }
+    if (!canEditReport) {
+      return;
+    }
     setReports(updatedReports);
 
     try {
@@ -1857,6 +2010,14 @@ export default function App() {
   // ==========================================
 
   const updateActiveReport = (updates: Partial<DailyReport>) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const updated = {
       ...activeReport,
       ...updates
@@ -1869,6 +2030,14 @@ export default function App() {
   };
 
   const updateItemValue = (itemId: string, fields: Partial<StockItem>) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const updatedItems = activeReport.items.map(item => {
       if (item.id === itemId) {
         const merged = { ...item, ...fields };
@@ -1934,6 +2103,14 @@ export default function App() {
   };
 
   const handleAddStockMasuk = (itemId: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const kgToAdd = Number(addKg) || 0;
     const collyToAdd = Number(addColly) || 0;
 
@@ -1979,6 +2156,14 @@ export default function App() {
   };
 
   const handleProcessPenerimaan = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const collyCount = Number(rcvColly) || 0;
     const kgWeight = Number(rcvTotalKg) || 0;
     
@@ -2153,6 +2338,14 @@ export default function App() {
   };
 
   const handleDeleteOutboundLog = (logId: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const activeOutLogs = activeReport.feedAddOutboundLogs !== undefined ? activeReport.feedAddOutboundLogs : DEFAULT_FEED_ADD_OUTBOUND_LOGS;
     const logToDelete = activeOutLogs.find(l => l.id === logId);
     if (!logToDelete) return;
@@ -2192,6 +2385,14 @@ export default function App() {
   };
 
   const handleAddStockKeluar = (itemId: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengeluarkan data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const kgToOut = Number(outKg) || 0;
     const collyToOut = Number(outColly) || 0;
 
@@ -2267,6 +2468,14 @@ export default function App() {
   };
 
   const handleAddNewItem = (master: MasterMaterial) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const newItem: StockItem = {
       id: `item-${Date.now()}`,
       kode: master.kode,
@@ -2294,6 +2503,14 @@ export default function App() {
   };
 
   const handleAddNewCustomItem = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const newItem: StockItem = {
       id: `item-${Date.now()}`,
       kode: "NEW-CODE",
@@ -2321,6 +2538,14 @@ export default function App() {
   };
 
   const handleDeleteItem = (itemId: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const updatedItems = activeReport.items.filter(item => item.id !== itemId);
     updateActiveReport({ items: updatedItems });
     if (activeItemId === itemId) {
@@ -2329,6 +2554,14 @@ export default function App() {
   };
 
   const handleDeleteAllItems = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     if (!activeReport.items || activeReport.items.length === 0) {
       showNotification("Tidak ada item untuk dihapus!", "info");
       return;
@@ -2337,6 +2570,14 @@ export default function App() {
   };
 
   const executeDeleteAllItems = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     updateActiveReport({ items: [] });
     setActiveItemId(null);
     setDeleteAllConfirmOpen(false);
@@ -2344,6 +2585,14 @@ export default function App() {
   };
 
   const handleSaveEditedLot = (updatedItem: StockItem) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const stockAwalNum = Number(updatedItem.stockAwal) || 0;
     const stockAwalCollyNum = Number(updatedItem.stockAwalColly) || 0;
     const masukNum = Number(updatedItem.masuk) || 0;
@@ -2373,6 +2622,14 @@ export default function App() {
   // LOGIC: COPY PREVIOUS DAY REPORT
   // ==========================================
   const handleCopyFromPreviousDay = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     // Find prior date with records
     const dates = Object.keys(reports).sort();
     const curIndex = dates.indexOf(selectedDate);
@@ -2435,6 +2692,14 @@ export default function App() {
 
   // Create empty report template
   const handleCreateEmptyReport = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     updateActiveReport({
       items: [],
       gudangSLoct: "2001 - 2002",
@@ -2445,10 +2710,26 @@ export default function App() {
 
   // Reset to default factory seeded data for current date
   const handleResetToSeeded = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyetel ulang data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     setResetConfirmOpen(true);
   };
 
   const executeResetToSeeded = () => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyetel ulang data!", "error");
+      return;
+    }
+    if (!canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const resetReport: DailyReport = {
       date: selectedDate,
       gudangSLoct: "2001 - 2002",
@@ -4240,6 +4521,26 @@ export default function App() {
   const selectedItem = activeReport.items.find(item => item.id === activeItemId) || null;
   const effectiveStockAwalDate = activeReport.stockAwalDate || activeReport.date || selectedDate;
 
+  // AUTH GUARD: Check if checking session or user not logged in
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-[#F2F0ED] flex flex-col items-center justify-center font-sans p-4">
+        <div className="bg-white p-8 rounded-lg border-2 border-[#1A1A1A] shadow-xl text-center max-w-sm w-full animate-fade-in">
+          <div className="flex justify-center mb-4">
+            <JapfaLogo className="h-12" />
+          </div>
+          <div className="w-8 h-8 border-3 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <h2 className="font-serif font-bold text-sm text-neutral-800">Memeriksa Sesi Petugas...</h2>
+          <p className="text-[11px] text-neutral-500 mt-1">Sistem Informasi Pergudangan PT. Japfa Comfeed Indonesia Tbk</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-[#1A1A1A] font-sans pb-16 flex flex-col">
       
@@ -4427,8 +4728,13 @@ export default function App() {
             {/* Quick Master Catalog Access */}
             <button
               onClick={handleAddNewCustomItem}
-              className="px-3 py-1.5 border border-neutral-300 hover:border-[#1A1A1A] hover:bg-[#F2F0ED] rounded text-xs font-bold flex items-center gap-1.5 transition-all"
-              title="Tambah material baru langsung ke tabel"
+              disabled={!canEditReport}
+              className={`px-3 py-1.5 border rounded text-xs font-bold flex items-center gap-1.5 transition-all ${
+                !canEditReport 
+                  ? "opacity-50 cursor-not-allowed border-neutral-300 bg-neutral-100 text-neutral-400" 
+                  : "border-neutral-300 hover:border-[#1A1A1A] hover:bg-[#F2F0ED] cursor-pointer"
+              }`}
+              title={!canEditReport ? "Hanya akun atas nama Sabto dan Antonius yang dapat menambah barang" : "Tambah material baru langsung ke tabel"}
             >
               <Plus className="w-4 h-4 text-emerald-600" /> Tambah Barang
             </button>
@@ -4446,8 +4752,13 @@ export default function App() {
             <div className="flex items-center gap-1.5 border border-neutral-300 bg-neutral-50/50 p-1 rounded-md">
               <button
                 onClick={handleDeleteAllItems}
-                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                title="Hapus semua item laporan pada tanggal ini"
+                disabled={!canEditReport}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+                  !canEditReport 
+                    ? "opacity-50 cursor-not-allowed bg-neutral-300 text-neutral-500" 
+                    : "bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+                }`}
+                title={!canEditReport ? "Hanya akun atas nama Sabto dan Antonius yang dapat menghapus data" : "Hapus semua item laporan pada tanggal ini"}
               >
                 <Trash2 className="w-3.5 h-3.5" /> Hapus Semua
               </button>
@@ -4486,6 +4797,50 @@ export default function App() {
                 <FileDown className="w-3.5 h-3.5 text-neutral-500" /> CSV
               </button>
             </div>
+
+            {/* User Profile Pill & Logout Button in Header */}
+            {currentUser && (
+              <div className="flex items-center gap-2 pl-2 border-l border-neutral-300">
+                <div className="hidden sm:flex items-center gap-2 bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 py-1 px-2.5 rounded transition-all">
+                  <div className="w-7 h-7 rounded-full bg-red-700 text-white font-black text-[10px] flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                    {currentUser.photoURL ? (
+                      <img src={currentUser.photoURL} alt={currentUser.name} className="w-full h-full object-cover" />
+                    ) : (
+                      currentUser.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("")
+                    )}
+                  </div>
+                  <div className="min-w-0 text-left">
+                    <div className="text-[11px] font-bold text-neutral-900 truncate max-w-[130px] leading-tight">
+                      {currentUser.name}
+                    </div>
+                    <div className="text-[9px] font-bold text-red-700 uppercase tracking-tight leading-tight flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>{currentUser.role}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLoginSettingsModalOpen(true)}
+                  className="px-2.5 py-1.5 border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-700 rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  title="Buka Pengaturan Sistem Login & Akun Petugas"
+                >
+                  <Settings className="w-3.5 h-3.5 text-red-600" />
+                  <span className="hidden lg:inline text-[11px]">Pengaturan Login</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLogoutModalOpen(true)}
+                  className="px-2.5 py-1.5 border border-red-300 bg-red-50 hover:bg-red-100 active:bg-red-200 text-red-700 rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  title="Keluar dari sesi sistem gudang"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-red-600" />
+                  <span className="hidden md:inline text-[11px]">Keluar</span>
+                </button>
+              </div>
+            )}
           </div>
 
         </div>
@@ -4504,6 +4859,53 @@ export default function App() {
         )}
       </div>
 
+      {/* ACCESS AUTHORITY BANNER (READ-ONLY FOR GUEST & RESTRICTED EDITORS) */}
+      {isGuest ? (
+        <div className="bg-amber-500 text-black px-4 py-2.5 text-xs font-bold shadow-xs print:hidden border-b-2 border-amber-600">
+          <div className="flex items-center justify-between max-w-7xl mx-auto w-full gap-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 shrink-0 text-black" />
+              <span>
+                <strong>AKUN TAMU (HANYA LIHAT):</strong> Anda masuk sebagai akun <u>Tamu</u>. Anda hanya dapat melihat data laporan (Read-Only). 
+                Dilarang keras mengedit, menghapus, atau menyimpan data apapun.
+              </span>
+            </div>
+            <span className="bg-black/15 text-black px-2 py-0.5 rounded text-[10px] font-mono shrink-0 uppercase tracking-wider font-extrabold">
+              Akses Terbatas
+            </span>
+          </div>
+        </div>
+      ) : !canEditReport ? (
+        <div className="bg-blue-700 text-white px-4 py-2 text-xs font-bold shadow-xs print:hidden border-b-2 border-blue-800">
+          <div className="flex items-center justify-between max-w-7xl mx-auto w-full gap-3">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 shrink-0 text-amber-300" />
+              <span>
+                <strong>MODE PEMBACA LAPORAN:</strong> Anda login sebagai <u>{currentUser?.name}</u> ({currentUser?.role}). 
+                Sesuai kebijakan, <strong>hanya akun atas nama Sabto dan Antonius</strong> yang dapat mengedit isi data laporan.
+              </span>
+            </div>
+            <span className="bg-white/20 text-white px-2 py-0.5 rounded text-[10px] font-mono shrink-0 uppercase tracking-wider">
+              Lihat Sahaja
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-emerald-800 text-white px-4 py-1.5 text-[11px] font-semibold shadow-xs print:hidden border-b border-emerald-900">
+          <div className="flex items-center justify-between max-w-7xl mx-auto w-full gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-300" />
+              <span>
+                <strong>Wewenang Penuh:</strong> Login sebagai <strong>{currentUser?.name}</strong> ({currentUser?.role}). Anda memiliki wewenang penuh untuk mengedit, menambah, dan menghapus isi data laporan.
+              </span>
+            </div>
+            <span className="bg-emerald-700 text-emerald-100 px-2 py-0.5 rounded text-[9px] font-mono shrink-0 uppercase font-bold tracking-wider">
+              Otoritas Aktif
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ==========================================
           MAIN LAYOUT CONTAINER
           ========================================== */}
@@ -4512,6 +4914,36 @@ export default function App() {
         {/* SIDEBAR MAIN NAVIGATION (HIDDEN ON PRINT) */}
         <aside className="w-full xl:w-56 shrink-0 print:hidden flex flex-col gap-4 font-sans">
           
+          {/* PETUGAS AKTIF CARD IN SIDEBAR */}
+          {currentUser && (
+            <div className="bg-white border-2 border-[#1A1A1A] p-3 shadow-xs rounded">
+              <div className="flex items-center justify-between border-b border-neutral-200 pb-1.5 mb-2">
+                <span className="text-[9px] font-mono bg-red-50 text-red-700 px-1.5 py-0.5 rounded uppercase font-extrabold border border-red-200">
+                  PETUGAS AKTIF
+                </span>
+                <span className="text-[9px] text-neutral-400 font-mono">
+                  {currentUser.shift || "Shift 1"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-red-700 text-white font-black text-xs flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
+                  {currentUser.photoURL ? (
+                    <img src={currentUser.photoURL} alt={currentUser.name} className="w-full h-full object-cover" />
+                  ) : (
+                    currentUser.name.split(" ").map((n: string) => n[0]).slice(0, 2).join("")
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-neutral-900 truncate leading-tight">{currentUser.name}</p>
+                  <span className="text-[10px] font-semibold text-red-700 block leading-tight mt-0.5">{currentUser.role}</span>
+                  {currentUser.nik && (
+                    <span className="text-[9px] font-mono text-neutral-400 block leading-tight">{currentUser.nik}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* NAVIGATION MENU CARD */}
           <div className="bg-white border-2 border-[#1A1A1A] p-4 shadow-sm rounded">
             <div className="border-b-2 border-black pb-2 mb-3">
@@ -4680,6 +5112,24 @@ export default function App() {
                   </div>
                 </div>
               </button>
+
+              {/* BUTTON 5: PENGATURAN LOGIN */}
+              <button
+                type="button"
+                onClick={() => setIsLoginSettingsModalOpen(true)}
+                className="w-full text-left p-2.5 rounded border transition-all flex items-start gap-3 cursor-pointer bg-neutral-50 hover:bg-neutral-100 text-neutral-700 hover:text-black border-neutral-300 mt-2 shadow-2xs"
+                title="Buka Pengaturan Sistem Login & Akun Petugas"
+              >
+                <Settings className="w-4 h-4 mt-0.5 shrink-0 text-red-600" />
+                <div>
+                  <div className="text-xs font-bold leading-tight uppercase flex items-center gap-1.5">
+                    <span>Pengaturan Login</span>
+                  </div>
+                  <div className="text-[9px] leading-none mt-0.5 text-neutral-500">
+                    Akun Petugas & Keamanan
+                  </div>
+                </div>
+              </button>
             </div>
           </div>
 
@@ -4713,6 +5163,8 @@ export default function App() {
             onSyncFromPreviousDay={handleSyncKarungFromPreviousDay}
             previousReportDate={getPreviousKarungReportDate(selectedDate)}
             onSaveStock={handleSaveAllStock}
+            canEditReport={canEditReport}
+            isGuest={isGuest}
           />
         )}
         {activeTab === "stock-label" && (
@@ -4725,6 +5177,8 @@ export default function App() {
             onSyncFromPreviousDay={handleSyncLabelFromPreviousDay}
             previousReportDate={getPreviousLabelReportDate(selectedDate)}
             onSaveStock={handleSaveAllStock}
+            canEditReport={canEditReport}
+            isGuest={isGuest}
           />
         )}
         {activeTab === "laporan-resmi" && (
@@ -4733,6 +5187,8 @@ export default function App() {
             selectedDate={selectedDate}
             onUpdateReport={handleUpdateKarungReport}
             showNotification={showNotification}
+            canEditReport={canEditReport}
+            isGuest={isGuest}
           />
         )}
         {/* ============================================================== */}
@@ -5122,7 +5578,16 @@ export default function App() {
                                 autoFocus
                               />
                             ) : (
-                              <span onDoubleClick={() => setEditingCell({ itemId: firstItem.id, field: "kode" })} className="cursor-pointer">
+                              <span 
+                                onDoubleClick={() => {
+                                  if (!canEditReport) {
+                                    showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                    return;
+                                  }
+                                  setEditingCell({ itemId: firstItem.id, field: "kode" });
+                                }} 
+                                className={canEditReport ? "cursor-pointer hover:underline" : "cursor-default"}
+                              >
                                 {firstItem.kode || "-"}
                               </span>
                             )}
@@ -5147,8 +5612,14 @@ export default function App() {
                             ) : (
                               <div className="flex flex-col leading-tight">
                                 <span 
-                                  onDoubleClick={() => setEditingCell({ itemId: firstItem.id, field: "namaMaterial" })}
-                                  className="font-serif italic font-bold text-xs cursor-pointer"
+                                  onDoubleClick={() => {
+                                    if (!canEditReport) {
+                                      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                      return;
+                                    }
+                                    setEditingCell({ itemId: firstItem.id, field: "namaMaterial" });
+                                  }}
+                                  className={`font-serif italic font-bold text-xs ${canEditReport ? "cursor-pointer hover:underline" : "cursor-default"}`}
                                 >
                                   {firstItem.namaMaterial || "Tulis Nama..."}
                                 </span>
@@ -5347,20 +5818,38 @@ export default function App() {
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
+                                            if (!canEditReport) {
+                                              showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                              return;
+                                            }
                                             setEditingLotItem(subItem);
                                           }}
-                                          className="p-1 rounded text-neutral-500 hover:text-amber-700 hover:bg-amber-100 transition-colors inline-block cursor-pointer"
-                                          title="Edit detail lot kavling"
+                                          disabled={!canEditReport}
+                                          className={`p-1 rounded transition-colors inline-block ${
+                                            !canEditReport 
+                                              ? "opacity-30 cursor-not-allowed text-neutral-300" 
+                                              : "text-neutral-500 hover:text-amber-700 hover:bg-amber-100 cursor-pointer"
+                                          }`}
+                                          title={!canEditReport ? "Hanya Sabto dan Antonius yang dapat mengedit lot" : "Edit detail lot kavling"}
                                         >
                                           <Pencil className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
+                                            if (!canEditReport) {
+                                              showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                              return;
+                                            }
                                             handleDeleteItem(subItem.id);
                                           }}
-                                          className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors inline-block cursor-pointer"
-                                          title="Hapus lot ini"
+                                          disabled={!canEditReport}
+                                          className={`p-1 rounded transition-colors inline-block ${
+                                            !canEditReport 
+                                              ? "opacity-30 cursor-not-allowed text-neutral-300" 
+                                              : "text-neutral-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                          }`}
+                                          title={!canEditReport ? "Hanya Sabto dan Antonius yang dapat menghapus lot" : "Hapus lot ini"}
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -5383,15 +5872,19 @@ export default function App() {
                           <td className="border-r border-[#1A1A1A] p-1 text-left bg-white align-middle">
                             <textarea
                               value={firstItem.keterangan || ""}
+                              readOnly={!canEditReport}
                               onChange={(e) => {
+                                if (!canEditReport) return;
                                 const val = e.target.value;
                                 itemsInGroup.forEach(item => {
                                   updateItemValue(item.id, { keterangan: val });
                                 });
                               }}
-                              placeholder="Tambah catatan..."
+                              placeholder={canEditReport ? "Tambah catatan..." : "-"}
                               rows={3}
-                              className="w-full text-[10px] p-1 border-none bg-transparent resize-none focus:outline-none focus:bg-neutral-50 font-sans print:p-0 print:placeholder-transparent"
+                              className={`w-full text-[10px] p-1 border-none bg-transparent resize-none font-sans print:p-0 print:placeholder-transparent ${
+                                canEditReport ? "focus:outline-none focus:bg-neutral-50" : "cursor-default select-text"
+                              }`}
                             />
                           </td>
 
@@ -5411,17 +5904,24 @@ export default function App() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (!canEditReport) {
+                                    showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                    return;
+                                  }
                                   const nextChecked = !isGroupChecked;
                                   itemsInGroup.forEach(item => {
                                     updateItemValue(item.id, { checked: nextChecked });
                                   });
                                 }}
-                                className={`w-4 h-4 rounded border flex items-center justify-center transition-colors cursor-pointer print:hidden ${
-                                  isGroupChecked 
-                                    ? "bg-[#1A1A1A] border-[#1A1A1A] text-white" 
-                                    : "border-neutral-300 hover:border-[#1A1A1A] bg-transparent text-transparent"
+                                disabled={!canEditReport}
+                                className={`w-4 h-4 rounded border flex items-center justify-center transition-colors print:hidden ${
+                                  !canEditReport
+                                    ? "cursor-not-allowed opacity-40 border-neutral-300 bg-neutral-100"
+                                    : isGroupChecked 
+                                      ? "bg-[#1A1A1A] border-[#1A1A1A] text-white cursor-pointer" 
+                                      : "border-neutral-300 hover:border-[#1A1A1A] bg-transparent text-transparent cursor-pointer"
                                 }`}
-                                title={isGroupChecked ? "Tersertifikasi OK" : "Tandai Cek"}
+                                title={!canEditReport ? "Hanya Sabto dan Antonius yang dapat mengubah status cek" : (isGroupChecked ? "Tersertifikasi OK" : "Tandai Cek")}
                               >
                                 <svg className="w-3 h-3 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -5435,14 +5935,23 @@ export default function App() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                if (!canEditReport) {
+                                  showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                                  return;
+                                }
                                 if (confirm(`Hapus seluruh data untuk material "${firstItem.namaMaterial}" (${itemsInGroup.length} lot)?`)) {
                                   itemsInGroup.forEach(item => {
                                     handleDeleteItem(item.id);
                                   });
                                 }
                               }}
-                              className="p-1 rounded text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                              title="Hapus seluruh material ini (semua lot)"
+                              disabled={!canEditReport}
+                              className={`p-1 rounded transition-colors ${
+                                !canEditReport 
+                                  ? "opacity-30 cursor-not-allowed text-neutral-300" 
+                                  : "text-neutral-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                              }`}
+                              title={!canEditReport ? "Hanya Sabto dan Antonius yang dapat menghapus material" : "Hapus seluruh material ini (semua lot)"}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -6082,6 +6591,46 @@ export default function App() {
         item={editingLotItem}
         onClose={() => setEditingLotItem(null)}
         onSave={handleSaveEditedLot}
+      />
+
+      {/* LOGOUT CONFIRMATION MODAL */}
+      {isLogoutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in print:hidden">
+          <div className="bg-white border-2 border-[#1A1A1A] rounded-lg shadow-2xl max-w-sm w-full p-6 text-center animate-scale-in">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-700 flex items-center justify-center mx-auto mb-4 border border-red-200 shadow-inner">
+              <LogOut className="w-6 h-6" />
+            </div>
+            <h3 className="font-serif font-black text-lg text-neutral-900">Konfirmasi Keluar</h3>
+            <p className="text-xs text-neutral-600 mt-2 leading-relaxed">
+              Apakah Anda yakin ingin keluar dari sesi <strong>{currentUser?.name}</strong>? Seluruh data laporan gudang Anda tetap tersimpan aman di database cloud.
+            </p>
+            <div className="mt-6 flex justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsLogoutModalOpen(false)}
+                className="px-4 py-2 border border-neutral-300 rounded text-xs font-bold text-neutral-700 hover:bg-neutral-100 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-4 py-2 bg-red-700 hover:bg-red-800 active:bg-red-900 text-white rounded text-xs font-bold shadow-md cursor-pointer flex items-center gap-1.5"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Ya, Keluar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PENGATURAN SISTEM LOGIN MODAL */}
+      <LoginSystemSettingsModal
+        isOpen={isLoginSettingsModalOpen}
+        onClose={() => setIsLoginSettingsModalOpen(false)}
+        currentUserName={currentUser?.name}
+        currentRole={currentUser?.role}
       />
 
       {/* CUSTOM CSS FOR GENERAL PRINT WORKFLOW */}

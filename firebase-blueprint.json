@@ -72,6 +72,41 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["items"]
+    },
+    "users": {
+      "title": "User Profiles",
+      "description": "User profiles and roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "department": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "system_settings": {
+      "title": "System Settings and Login Configuration",
+      "description": "Login policies, managed staff accounts, and security settings",
+      "type": "object",
+      "properties": {
+        "accounts": { "type": "array" },
+        "logs": { "type": "array" },
+        "allowGoogleLogin": { "type": "boolean" },
+        "allowNikPinLogin": { "type": "boolean" },
+        "allowSelfRegistration": { "type": "boolean" },
+        "requireNikValidation": { "type": "boolean" },
+        "sessionDurationHours": { "type": "number" },
+        "minPinLength": { "type": "number" },
+        "defaultRoleForNewUsers": { "type": "string" },
+        "companyHeaderTitle": { "type": "string" },
+        "companyHeaderSubtitle": { "type": "string" },
+        "loginNotice": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      }
     }
   }
 }

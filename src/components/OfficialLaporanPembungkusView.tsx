@@ -31,13 +31,17 @@ interface OfficialLaporanPembungkusViewProps {
   selectedDate: string;
   onUpdateReport: (updatedReport: KarungReport) => void;
   showNotification: (message: string, type?: "success" | "error" | "info") => void;
+  canEditReport?: boolean;
+  isGuest?: boolean;
 }
 
 export function OfficialLaporanPembungkusView({
   report,
   selectedDate,
   onUpdateReport,
-  showNotification
+  showNotification,
+  canEditReport,
+  isGuest
 }: OfficialLaporanPembungkusViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isEditHeaderOpen, setIsEditHeaderOpen] = useState(false);
@@ -1026,40 +1030,96 @@ export function OfficialLaporanPembungkusView({
           </div>
 
           <button
-            onClick={() => setIsEditHeaderOpen(true)}
-            className="px-3 py-1.5 border border-neutral-700 hover:bg-neutral-100 text-neutral-800 rounded text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            onClick={() => {
+              if (isGuest) {
+                showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengedit header!", "error");
+                return;
+              }
+              if (canEditReport !== undefined && !canEditReport) {
+                showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                return;
+              }
+              setIsEditHeaderOpen(true);
+            }}
+            disabled={canEditReport === false || isGuest}
+            className={`px-3 py-1.5 border rounded text-xs font-bold flex items-center gap-1.5 transition-colors ${
+              canEditReport === false || isGuest 
+                ? "border-neutral-300 text-neutral-400 opacity-50 cursor-not-allowed" 
+                : "border-neutral-700 hover:bg-neutral-100 text-neutral-800 cursor-pointer"
+            }`}
           >
             <Edit3 className="w-3.5 h-3.5" /> Edit Header
           </button>
 
           <button
             onClick={() => {
+              if (isGuest) {
+                showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+                return;
+              }
+              if (canEditReport !== undefined && !canEditReport) {
+                showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                return;
+              }
               setIsInboundModalOpen(true);
               if (items.length > 0 && !inboundItemId) {
                 setInboundItemId(items[0].id);
                 setInboundSloct(items[0].gudangKav || sLoc || "3001");
               }
             }}
-            className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            disabled={canEditReport === false || isGuest}
+            className={`px-3.5 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+              canEditReport === false || isGuest 
+                ? "bg-neutral-400 text-neutral-200 opacity-50 cursor-not-allowed" 
+                : "bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+            }`}
           >
             <ArrowDownLeft className="w-4 h-4 text-emerald-200" /> Input Penerimaan
           </button>
 
           <button
             onClick={() => {
+              if (isGuest) {
+                showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengubah data!", "error");
+                return;
+              }
+              if (canEditReport !== undefined && !canEditReport) {
+                showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                return;
+              }
               setIsOutboundModalOpen(true);
               if (items.length > 0 && !outboundItemId) {
                 setOutboundItemId(items[0].id);
               }
             }}
-            className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            disabled={canEditReport === false || isGuest}
+            className={`px-3.5 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+              canEditReport === false || isGuest 
+                ? "bg-neutral-400 text-neutral-200 opacity-50 cursor-not-allowed" 
+                : "bg-rose-700 hover:bg-rose-800 text-white cursor-pointer"
+            }`}
           >
             <ArrowUpRight className="w-4 h-4 text-rose-200" /> Input Pengeluaran
           </button>
 
           <button
-            onClick={() => setIsAddItemModalOpen(true)}
-            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-900 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            onClick={() => {
+              if (isGuest) {
+                showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+                return;
+              }
+              if (canEditReport !== undefined && !canEditReport) {
+                showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                return;
+              }
+              setIsAddItemModalOpen(true);
+            }}
+            disabled={canEditReport === false || isGuest}
+            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+              canEditReport === false || isGuest 
+                ? "bg-neutral-400 text-neutral-200 opacity-50 cursor-not-allowed" 
+                : "bg-neutral-800 hover:bg-neutral-900 text-white cursor-pointer"
+            }`}
           >
             <Plus className="w-3.5 h-3.5" /> Tambah Karung
           </button>

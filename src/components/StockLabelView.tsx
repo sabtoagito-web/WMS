@@ -36,6 +36,8 @@ interface StockLabelViewProps {
   onSyncFromPreviousDay?: (currentDate: string) => void;
   previousReportDate?: string | null;
   onSaveStock?: () => void;
+  canEditReport?: boolean;
+  isGuest?: boolean;
 }
 
 export function StockLabelView({
@@ -46,7 +48,9 @@ export function StockLabelView({
   onDateChange,
   onSyncFromPreviousDay,
   previousReportDate,
-  onSaveStock
+  onSaveStock,
+  canEditReport,
+  isGuest
 }: StockLabelViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<"table" | "inbound" | "outbound" | "print">("table");
   const [searchQuery, setSearchQuery] = useState("");
@@ -124,6 +128,14 @@ export function StockLabelView({
   };
 
   const handleDeleteItem = (id: string) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menghapus data!", "error");
+      return;
+    }
+    if (canEditReport !== undefined && !canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     const target = items.find((it) => it.id === id);
     if (!target) return;
     setItemToDelete(target);
@@ -139,6 +151,14 @@ export function StockLabelView({
   };
 
   const handleAddItem = (newItem: LabelItem) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+      return;
+    }
+    if (canEditReport !== undefined && !canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     onUpdateReport({
       ...report,
       items: [...items, newItem]
@@ -147,6 +167,14 @@ export function StockLabelView({
   };
 
   const handleOpenEditModal = (item: LabelItem) => {
+    if (isGuest) {
+      showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan mengedit data!", "error");
+      return;
+    }
+    if (canEditReport !== undefined && !canEditReport) {
+      showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+      return;
+    }
     setEditingItem(item);
     setIsEditModalOpen(true);
   };
@@ -619,6 +647,10 @@ export function StockLabelView({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
+                if (isGuest) {
+                  showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menyimpan data!", "error");
+                  return;
+                }
                 if (onSaveStock) {
                   onSaveStock();
                 } else {
@@ -633,8 +665,24 @@ export function StockLabelView({
               <span>Simpan Stock Label</span>
             </button>
             <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              onClick={() => {
+                if (isGuest) {
+                  showNotification("Akses Ditolak: Akun Tamu hanya memiliki hak akses Lihat Data (Read-Only). Tidak diizinkan menambah data!", "error");
+                  return;
+                }
+                if (canEditReport !== undefined && !canEditReport) {
+                  showNotification("Akses Terbatas: Hanya akun atas nama Sabto dan Antonius yang dapat mengedit isi data laporan.", "error");
+                  return;
+                }
+                setIsAddModalOpen(true);
+              }}
+              disabled={canEditReport === false || isGuest}
+              className={`px-3.5 py-2 text-white text-xs font-bold rounded flex items-center gap-1.5 transition-colors shadow-xs ${
+                canEditReport === false || isGuest 
+                  ? "bg-neutral-400 opacity-60 cursor-not-allowed" 
+                  : "bg-emerald-700 hover:bg-emerald-800 cursor-pointer"
+              }`}
+              title={canEditReport === false || isGuest ? "Hanya akun atas nama Sabto dan Antonius yang dapat menambah label" : "Tambah label baru"}
             >
               <Plus className="w-4 h-4" /> 
               <span>Tambah Label Baru</span>

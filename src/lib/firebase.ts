@@ -1,5 +1,13 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signOut as firebaseSignOut,
+  onAuthStateChanged,
+  User as FirebaseUser
+} from "firebase/auth";
+import { 
   initializeFirestore, 
   getFirestore, 
   persistentLocalCache, 
@@ -26,3 +34,10 @@ try {
 }
 
 export const db = firestoreInstance;
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
+export { signInWithPopup, firebaseSignOut, onAuthStateChanged };
+export type { FirebaseUser };
+
